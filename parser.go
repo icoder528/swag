@@ -702,6 +702,49 @@ func getSchemes(commentLine string) []string {
 
 // ParseRouterAPIInfo parses router api info for given astFile.
 func (parser *Parser) ParseRouterAPIInfo(fileName string, astFile *ast.File) error {
+
+	for _, cg := range astFile.Comments {
+		// for per 'function' comment, create a new 'Operation' object
+		operation := NewOperation(parser, SetCodeExampleFilesDirectory(parser.codeExampleFilesDir))
+		for _, comment := range cg.List {
+			err := operation.ParseComment(comment.Text, astFile)
+			if err != nil {
+				return fmt.Errorf("ParseComment error in file %s :%+v", fileName, err)
+			}
+		}
+
+		for _, routeProperties := range operation.RouterProperties {
+			var pathItem spec.PathItem
+			var ok bool
+
+			pathItem, ok = parser.swagger.Paths.Paths[routeProperties.Path]
+			if !ok {
+				pathItem = spec.PathItem{}
+			}
+
+			op := refRouteMethodOp(&pathItem, routeProperties.HTTPMethod)
+
+			// check if we already have a operation for this path and method
+			if *op != nil {
+				err := fmt.Errorf("route %s %s is declared multiple times", routeProperties.HTTPMethod, routeProperties.Path)
+				if parser.Strict {
+					return err
+				}
+				parser.debug.Printf("warning: %s\n", err)
+			}
+
+			*op = &operation.Operation
+
+			parser.swagger.Paths.Paths[routeProperties.Path] = pathItem
+		}
+
+	}
+
+	return nil
+}
+
+// ParseRouterAPIInfo parses router api info for given astFile.
+func (parser *Parser) ParseRouterAPIInfoStd(fileName string, astFile *ast.File) error {
 	for _, astDescription := range astFile.Decls {
 		astDeclaration, ok := astDescription.(*ast.FuncDecl)
 		if ok && astDeclaration.Doc != nil && astDeclaration.Doc.List != nil {
